@@ -1,4 +1,5 @@
 /build/
+/vendor/
 /tests/consumer/virions/
 /tests/consumer/build/
 /tests/consumer-extracted/

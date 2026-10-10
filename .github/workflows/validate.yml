@@ -43,19 +43,14 @@ jobs:
           INPUT_INSTALL-PATH: ./.php-bin
         run: node "$GITHUB_WORKSPACE/.dependencies/setup-php-action/dist/index.js"
 
-      - name: Check out pinned DevTools source
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: NhanAZ/DevTools
-          ref: 6606444fc32787a3e50275fdb668c2310e899740
-          path: .dependencies/devtools
-          persist-credentials: false
+      - name: Validate Composer metadata
+        run: composer validate --strict
 
-      - name: Install pinned PHPStan and Axolotl-PM dependencies
+      - name: Install locked PHPStan and Axolotl-PM dependencies
         shell: bash
         run: |
-          composer install --working-dir=.dependencies/devtools --no-interaction --prefer-dist --no-progress --no-scripts --no-plugins
-          composer install --working-dir=.dependencies/axolotl-pm --no-interaction --prefer-dist --no-progress --no-scripts --no-plugins
+          composer install --no-interaction --prefer-dist --no-progress --no-scripts --no-plugins
+          composer install --working-dir=.dependencies/axolotl-pm --no-dev --no-interaction --prefer-dist --no-progress --no-scripts --no-plugins
 
       - name: Validate virion manifest and PHP syntax
         shell: bash
@@ -64,7 +59,7 @@ jobs:
           find src tests -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Run PHPStan at maximum level
-        run: php .dependencies/devtools/vendor/phpstan/phpstan/phpstan.phar analyse --level=max --autoload-file=.dependencies/axolotl-pm/vendor/autoload.php --no-progress src tests/frozen-packet.php tests/consumer/src
+        run: php vendor/phpstan/phpstan/phpstan.phar analyse --level=max --autoload-file=.dependencies/axolotl-pm/vendor/autoload.php --no-progress src tests/frozen-packet.php tests/consumer/src
 
       - name: Test frozen effect packet fields
         run: php tests/frozen-packet.php .dependencies/axolotl-pm
@@ -76,18 +71,26 @@ jobs:
           cp virion.yml LICENSE tests/consumer/virions/FrozenEffect/
           cp -R src tests/consumer/virions/FrozenEffect/
 
-      - name: Build and inspect consumer PHAR with DevTools
+      - name: Build consumer PHAR with pinned DevTools
+        id: build
+        uses: NhanAZ/DevTools@6606444fc32787a3e50275fdb668c2310e899740
+        with:
+          project: tests/consumer
+          virions: tests/consumer/virions
+          output: tests/consumer/build
+
+      - name: Verify consumer PHAR contents and checksum
         shell: bash
+        env:
+          PHAR_PATH: ${{ steps.build.outputs.phar }}
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
         run: |
-          php .dependencies/devtools/bin/devtools.php doctor --project=tests/consumer --virions=virions --json
-          php -d phar.readonly=0 .dependencies/devtools/bin/devtools.php build --project=tests/consumer --virions=virions --json
-          php .dependencies/devtools/bin/devtools.php inspect --project=tests/consumer --artifact=build/FrozenEffectConsumer.phar --json
-          php -r '$p=new Phar("tests/consumer/build/FrozenEffectConsumer.phar"); $found=false; foreach(new RecursiveIteratorIterator($p) as $file){if(str_ends_with($file->getPathname(),"/FrozenEffect.php")) $found=true;} if(!$found || !$p->offsetExists("META-INF/virions/FrozenEffect/LICENSE")) exit(1);'
+          php -r '$p=new Phar(getenv("PHAR_PATH")); $found=false; foreach(new RecursiveIteratorIterator($p) as $file){if(str_ends_with($file->getPathname(),"/FrozenEffect.php")) $found=true;} $m=json_decode(file_get_contents(getenv("BUILD_METADATA")),true,512,JSON_THROW_ON_ERROR); if(!$found || !$p->offsetExists("META-INF/virions/FrozenEffect/LICENSE") || hash_file("sha256",getenv("PHAR_PATH")) !== $m["data"]["sha256"]) exit(1);'
 
       - name: Upload verified consumer fixture artifact
         uses: actions/upload-artifact@v7.0.1
         with:
           name: FrozenEffect-consumer-${{ github.sha }}
-          path: tests/consumer/build/FrozenEffectConsumer.phar
+          path: ${{ steps.build.outputs.phar }}
           if-no-files-found: error
           retention-days: 14

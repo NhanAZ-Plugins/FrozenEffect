@@ -1,0 +1,23 @@
+{
+  "name": "nhanaz/frozen-effect-virion",
+  "description": "Frozen overlay virion for Axolotl-PM plugins",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "skymin",
+      "role": "Original author"
+    }
+  ],
+  "require": {
+    "php": "^8.1"
+  },
+  "require-dev": {
+    "phpstan/phpstan": "2.3.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "skymin\\FrozenEffect\\": "src/skymin/FrozenEffect/"
+    }
+  }
+}
