@@ -1,0 +1,6 @@
+name: FrozenEffectConsumer
+version: 0.0.1
+main: FrozenEffectConsumer\Main
+api: 5.0.0
+src-namespace-prefix: FrozenEffectConsumer
+description: Verify FrozenEffect virion packaging

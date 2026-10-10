@@ -1,0 +1,93 @@
+name: Test FrozenEffect virion and consumer build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate virion API and packaging
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out FrozenEffect source
+        uses: actions/checkout@v7.0.1
+
+      - name: Check out pinned Axolotl-PM source
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: axolotl-pm/PocketMine-MP
+          ref: dfe0d07e48a9e8d5a4a242fa43ff1cd3b743a955
+          path: .dependencies/axolotl-pm
+          persist-credentials: false
+
+      - name: Check out Axolotl-PM PHP setup helper
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: axolotl-pm/setup-php-action
+          ref: b8c3f9add4f2ad4a5e2624a1112aba899ee8db0e
+          path: .dependencies/setup-php-action
+          persist-credentials: false
+
+      - name: Set up Axolotl-PM PHP environment
+        shell: bash
+        env:
+          INPUT_PHP-VERSION: "8.1"
+          INPUT_PM-VERSION-MAJOR: "5"
+          INPUT_INSTALL-PATH: ./.php-bin
+        run: node "$GITHUB_WORKSPACE/.dependencies/setup-php-action/dist/index.js"
+
+      - name: Check out pinned DevTools source
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: NhanAZ/DevTools
+          ref: 6606444fc32787a3e50275fdb668c2310e899740
+          path: .dependencies/devtools
+          persist-credentials: false
+
+      - name: Install pinned PHPStan and Axolotl-PM dependencies
+        shell: bash
+        run: |
+          composer install --working-dir=.dependencies/devtools --no-interaction --prefer-dist --no-progress --no-scripts --no-plugins
+          composer install --working-dir=.dependencies/axolotl-pm --no-interaction --prefer-dist --no-progress --no-scripts --no-plugins
+
+      - name: Validate virion manifest and PHP syntax
+        shell: bash
+        run: |
+          php -r '$m=yaml_parse_file("virion.yml"); if(!is_array($m) || ($m["name"] ?? null) !== "FrozenEffect" || ($m["api"] ?? null) !== "5.0.0" || ($m["version"] ?? null) !== "2.0.0") exit(1);'
+          find src tests -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Run PHPStan at maximum level
+        run: php .dependencies/devtools/vendor/phpstan/phpstan/phpstan.phar analyse --level=max --autoload-file=.dependencies/axolotl-pm/vendor/autoload.php --no-progress src tests/frozen-packet.php tests/consumer/src
+
+      - name: Test frozen effect packet fields
+        run: php tests/frozen-packet.php .dependencies/axolotl-pm
+
+      - name: Stage FrozenEffect for the consumer fixture
+        shell: bash
+        run: |
+          mkdir -p tests/consumer/virions/FrozenEffect
+          cp virion.yml LICENSE tests/consumer/virions/FrozenEffect/
+          cp -R src tests/consumer/virions/FrozenEffect/
+
+      - name: Build and inspect consumer PHAR with DevTools
+        shell: bash
+        run: |
+          php .dependencies/devtools/bin/devtools.php doctor --project=tests/consumer --virions=virions --json
+          php -d phar.readonly=0 .dependencies/devtools/bin/devtools.php build --project=tests/consumer --virions=virions --json
+          php .dependencies/devtools/bin/devtools.php inspect --project=tests/consumer --artifact=build/FrozenEffectConsumer.phar --json
+          php -r '$p=new Phar("tests/consumer/build/FrozenEffectConsumer.phar"); $found=false; foreach(new RecursiveIteratorIterator($p) as $file){if(str_ends_with($file->getPathname(),"/FrozenEffect.php")) $found=true;} if(!$found || !$p->offsetExists("META-INF/virions/FrozenEffect/LICENSE")) exit(1);'
+
+      - name: Upload verified consumer fixture artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: FrozenEffect-consumer-${{ github.sha }}
+          path: tests/consumer/build/FrozenEffectConsumer.phar
+          if-no-files-found: error
+          retention-days: 14

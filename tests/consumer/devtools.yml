@@ -1,0 +1,3 @@
+virions:
+  - name: FrozenEffect
+    version: ^2.0.0
